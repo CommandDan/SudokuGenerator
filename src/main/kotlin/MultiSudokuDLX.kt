@@ -257,7 +257,7 @@ class MultiSudokuDLX(
         }
     }
 
-    /** Løs én løsning og returnér globalt grid som map: (row,col) -> v. */
+    /** Løs én løsning og returnér globalt grid som map: (row, col) -> v. */
     fun solveOneGrid(): Map<Pair<Int, Int>, Int>? {
         val dlx = DLX(totalCols)
         buildMatrix(dlx)
@@ -325,7 +325,7 @@ class MultiSudokuDLX(
         return cnt
     }
 
-    /** Sæt (row,col) globalt til 0 (fjern given) i alle boards der ejer cellen. */
+    /** Sæt (row, col) globalt til 0 (fjern given) i alle boards der ejer cellen. */
     fun clearGlobalCell(gr: Int, gc: Int) {
         val owners = cellOwners[Cell(gr, gc)] ?: return
         for ((bi, r, c) in owners) {
@@ -333,7 +333,7 @@ class MultiSudokuDLX(
         }
     }
 
-    /** Sæt (row,col) globalt til v i alle boards der ejer cellen. */
+    /** Sæt (row, col) globalt til v i alle boards der ejer cellen. */
     fun setGlobalCell(gr: Int, gc: Int, v: Int) {
         val owners = cellOwners[Cell(gr, gc)] ?: return
         for ((bi, r, c) in owners) {
