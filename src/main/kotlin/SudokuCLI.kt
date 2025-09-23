@@ -16,8 +16,8 @@ import java.io.File
 class SudokuCLI : CliktCommand(name = "sudoku-cli") {
     override fun help(context: Context) = "Generér Sudoku-PDF (single, samurai, plus4)"
     private val mode by option("--mode", "-m", help = "single | samurai | plus4")
-        .choice("single", "samurai", "plus4")
-        .default("single")
+        .choice("single", "samurai", "plus4", "multi")
+        .default("multi")
 
     private val out by option("--out", "-o", help = "Output PDF-fil").default("sudoku.pdf")
 
@@ -29,6 +29,12 @@ class SudokuCLI : CliktCommand(name = "sudoku-cli") {
     private val n by option("--n", help = "N (fx 9 for 9x9, 4 for 4x4)").int().default(9)
     private val boxRows by option("--box-rows", help = "Boks-rækker (3 for 9x9, 2 for 4x4)").int().default(3)
     private val boxCols by option("--box-cols", help = "Boks-kolonner (3 for 9x9, 2 for 4x4)").int().default(3)
+
+    // kun til multi:
+    private val rows by option("--rows", help = "Antal rækker i multi-layout").int().default(3)
+    private val cols by option("--cols", help = "Antal kolonner i multi-layout").int().default(2)
+    private val gapCells by option("--gap-cells", help = "Tomt mellemrum (i celler) mellem brætter").int().default(3)
+    private val varySeeds by option("--vary-seeds", help = "Brug forskelligt seed for hvert bræt").flag(default = true)
 
     override fun run() {
         val box = BoxSpec(boxRows, boxCols)
@@ -45,6 +51,28 @@ class SudokuCLI : CliktCommand(name = "sudoku-cli") {
             "plus4" -> {
                 val up = emptyNxN(9); val left = emptyNxN(9); val right = emptyNxN(9); val down = emptyNxN(9)
                 plus4Layout(up, left, right, down)
+            }
+            "multi" -> {
+                require(n == box.boxRows * box.boxCols) { "--n ($n) skal være boxRows*boxCols (${box.boxRows * box.boxCols})" }
+                val multi = buildMultiSingles(
+                    rows = rows, cols = cols,
+                    box = box,
+                    seed = seed,
+                    minGivens = minGivens,
+                    gapCells = gapCells,
+                    varySeeds = varySeeds
+                )
+
+                // skriv PDF – samme writer som før
+                writePuzzlePdf(
+                    outFile = File(out),
+                    box = multi.box,
+                    boards = multi.boards,
+                    solutionGlobal = multi.solutionGlobal,
+                    includeSolutionPage = includeSolution
+                )
+                echo("Skrev: ${File(out).absolutePath}")
+                return
             }
             else -> error("Ukendt mode")
         }
@@ -69,6 +97,72 @@ class SudokuCLI : CliktCommand(name = "sudoku-cli") {
 }
 
 fun main(args: Array<String>) = SudokuCLI().main(args)
+
+/* ======================= Flere af single sudoku ======================= */
+
+private data class MultiSingles(
+    val box: BoxSpec,
+    val boards: List<BoardSpec>,                      // opgaven (givens) for alle brætter lagt i gitter
+    val solutionGlobal: Map<Pair<Int,Int>, Int>,      // samlet løsning mappet til globale (row,col)
+    val rows: Int,
+    val cols: Int
+)
+
+/** Generér R×C uafhængige single-sudokuer og placér dem i et tiled gitter. */
+private fun buildMultiSingles(
+    rows: Int,
+    cols: Int,
+    box: BoxSpec,
+    seed: Long,
+    minGivens: Int,
+    gapCells: Int,
+    varySeeds: Boolean
+): MultiSingles {
+    require(rows > 0 && cols > 0)
+    val N = box.N
+    val boardsOut = mutableListOf<BoardSpec>()
+    val solutionOut = mutableMapOf<Pair<Int,Int>, Int>()
+
+    // Størrelse per “flise” i globale celler (inkl. mellemrum)
+    val tileH = N + gapCells
+    val tileW = N + gapCells
+
+    var idx = 0
+    for (r in 0 until rows) {
+        for (c in 0 until cols) {
+            val thisSeed = if (varySeeds) seed + idx else seed
+            idx++
+
+            // generér en enkelt “single”
+            val singleGivens = emptyNxN(N)
+            val singleBoards = listOf(BoardSpec(0,0, singleGivens))
+            val generated = MultiSudokuGenerator.generate(
+                box = box,
+                boards = singleBoards,
+                seed = thisSeed,
+                minGlobalGivens = minGivens
+            )
+
+            // offset i det globale canvas
+            val offR = r * tileH
+            val offC = c * tileW
+
+            // flyt givens til deres offset og put dem i out-boards
+            val placedGivens = Array(N) { IntArray(N) }
+            for (rr in 0 until N) for (cc in 0 until N) {
+                placedGivens[rr][cc] = generated.boards[0].givens[rr][cc]
+            }
+            boardsOut += BoardSpec(offR, offC, placedGivens)
+
+            // flyt løsningen over i globalt koordinatsystem
+            for ((pos, v) in generated.solutionGlobal) {
+                val (gr, gc) = pos
+                solutionOut[(gr + offR) to (gc + offC)] = v
+            }
+        }
+    }
+    return MultiSingles(box, boardsOut, solutionOut, rows, cols)
+}
 
 /* ======================= PDF-rendering (OpenPDF) ======================= */
 

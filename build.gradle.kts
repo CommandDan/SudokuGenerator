@@ -93,6 +93,7 @@ tasks.register<Zip>("releaseZip") {
             Kørselseksempler:
               java -jar ${baseName}-${versionStr}-all.jar --mode single --out sudoku.pdf --solution-page --seed 123 --min-givens 30
               java -jar ${baseName}-${versionStr}-all.jar --mode single --out sudoku-6x6.pdf --n 6 --box-rows 2 --box-cols 3
+              java -jar ${baseName}-${versionStr}-all.jar --mode multi --out sudoku-multi.pdf --rows 4 --cols 3 --gap-cells 1
         """.trimIndent()
         Files.createDirectories(runTxt.get().asFile.parentFile.toPath())
         runTxt.get().asFile.writeText(text, Charsets.UTF_8)
