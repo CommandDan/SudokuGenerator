@@ -32,7 +32,7 @@ kotlin {
 
 application {
     mainClass.set("$group.SudokuApp")
-    applicationName = "sudoku-generator-shadow"
+    applicationName = "SudokuGenerator"
     applicationDefaultJvmArgs += listOf("--enable-native-access=ALL-UNNAMED", "-Djna.nosys=true")
 }
 
@@ -66,8 +66,8 @@ val readmeFile = layout.projectDirectory.file("README.md")
 fun CopySpec.maybeInclude(file: RegularFile) {
     if (file.asFile.exists()) from(file)
 }
-fun CopySpec.maybeIncludeDir(dir: Directory) {
-    if (dir.asFile.exists() && dir.asFile.list()?.isNotEmpty() == true) from(dir) { into("fonts") }
+fun CopySpec.maybeIncludeDir(dir: Directory, into: String) {
+    if (dir.asFile.exists() && dir.asFile.list()?.isNotEmpty() == true) from(dir) { into(into) }
 }
 
 // Package the shadow distribution (bin + lib) into a single release zip
@@ -76,7 +76,7 @@ tasks.register<Zip>("releaseShadowDistZip") {
     group = "release"
     dependsOn(tasks.installShadowDist)
 
-    val appName = application.applicationName
+    val appName = "${application.applicationName}-shadow"
     val baseName = "SudokuGenerator"
     val versionStr = project.version.toString()
 
@@ -84,16 +84,24 @@ tasks.register<Zip>("releaseShadowDistZip") {
     destinationDirectory.set(layout.buildDirectory.dir("releases"))
     archiveFileName.set("${baseName}-${versionStr}-shadow.zip")
 
-    // Include the whole install dir (bin + lib)
+    // Include bin/ and lib/ at zip root, and only the shadow scripts
     val installDir = layout.buildDirectory.dir("install/${appName}")
-    from(installDir) {
-        // flatten one level so zip root contains bin/ and lib/
-        into(".")
+
+    // bin/ (only the shadow launchers)
+    from(installDir.map { it.dir("bin") }) {
+        into("bin")
+        includeEmptyDirs = false
+    }
+
+    // lib/ (everything; contains the shadow jar)
+    from(installDir.map { it.dir("lib") }) {
+        into("lib")
+        includeEmptyDirs = false
     }
 
     // Optional: include README and fonts at zip root (reusing helpers)
     maybeInclude(readmeFile)
-    maybeIncludeDir(fontsDir)
+    maybeIncludeDir(fontsDir, "fonts")
 
     // Add RUN.txt with examples using the generated scripts
     val runTxt = layout.buildDirectory.file("tmp/RUN.txt")
