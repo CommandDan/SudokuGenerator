@@ -32,6 +32,8 @@ kotlin {
 
 application {
     mainClass.set("$group.SudokuApp")
+    applicationName = "sudoku-generator-shadow"
+    applicationDefaultJvmArgs += listOf("--enable-native-access=ALL-UNNAMED", "-Djna.nosys=true")
 }
 
 // Reproducible JAR'er (ingen fil-timestamps, stabil orden)
@@ -68,32 +70,45 @@ fun CopySpec.maybeIncludeDir(dir: Directory) {
     if (dir.asFile.exists() && dir.asFile.list()?.isNotEmpty() == true) from(dir) { into("fonts") }
 }
 
-tasks.register<Zip>("releaseZip") {
-    description = "Pack a ZIP archive for release."
+// Package the shadow distribution (bin + lib) into a single release zip
+tasks.register<Zip>("releaseShadowDistZip") {
+    description = "Pack a ZIP from installShadowDist (includes bin/.bat scripts and shadow jar)."
     group = "release"
-    dependsOn(tasks.shadowJar)
+    dependsOn(tasks.installShadowDist)
 
-    val baseName = "DanishCrosswordGenerator"
+    val appName = application.applicationName
+    val baseName = "SudokuGenerator"
     val versionStr = project.version.toString()
-    archiveFileName.set("$baseName-$versionStr.zip")
-    destinationDirectory.set(layout.buildDirectory.dir("releases"))
 
-    // ALT ind i roden af zip (ingen dybe mapper)
-    from(tasks.shadowJar.get().archiveFile) {
-        rename { "${baseName}-${versionStr}-all.jar" }
+    // Zip goes to build/releases
+    destinationDirectory.set(layout.buildDirectory.dir("releases"))
+    archiveFileName.set("${baseName}-${versionStr}-shadow.zip")
+
+    // Include the whole install dir (bin + lib)
+    val installDir = layout.buildDirectory.dir("install/${appName}")
+    from(installDir) {
+        // flatten one level so zip root contains bin/ and lib/
+        into(".")
     }
-    // valgfrit indhold
+
+    // Optional: include README and fonts at zip root (reusing helpers)
     maybeInclude(readmeFile)
     maybeIncludeDir(fontsDir)
 
-    // læg en lille RUN.txt med kommandoeksempler
+    // Add RUN.txt with examples using the generated scripts
     val runTxt = layout.buildDirectory.file("tmp/RUN.txt")
     doFirst {
+        val unixCmd = "bin/${appName}"
+        val winCmd  = "bin/${appName}.bat"
         val text = """
             Kørselseksempler:
-              java -jar ${baseName}-${versionStr}-all.jar --mode single --out sudoku.pdf --solution-page --seed 123 --min-givens 30
-              java -jar ${baseName}-${versionStr}-all.jar --mode single --out sudoku-6x6.pdf --n 6 --box-rows 2 --box-cols 3
-              java -jar ${baseName}-${versionStr}-all.jar --mode multi --out sudoku-multi.pdf --rows 4 --cols 3 --gap-cells 1
+              # Unix/macOS
+              ${unixCmd} --mode single --out sudoku.pdf --solution-page --seed 123 --min-givens 30
+              ${unixCmd} --mode multi --rows 2 --cols 3 --gap-cells 1 --out multi.pdf
+
+              REM Windows
+              ${winCmd} --mode single --out sudoku.pdf --solution-page --seed 123 --min-givens 30
+              ${winCmd} --mode samurai --out samurai.pdf --min-givens 160 --solution-page
         """.trimIndent()
         Files.createDirectories(runTxt.get().asFile.parentFile.toPath())
         runTxt.get().asFile.writeText(text, Charsets.UTF_8)

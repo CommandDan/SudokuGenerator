@@ -103,7 +103,7 @@ fun main(args: Array<String>) = SudokuCLI().main(args)
 private data class MultiSingles(
     val box: BoxSpec,
     val boards: List<BoardSpec>,                      // opgaven (givens) for alle brætter lagt i gitter
-    val solutionGlobal: Map<Pair<Int,Int>, Int>,      // samlet løsning mappet til globale (row,col)
+    val solutionGlobal: Map<Pair<Int,Int>, Int>,      // samlet løsning mappet til globale (row, col)
     val rows: Int,
     val cols: Int
 )

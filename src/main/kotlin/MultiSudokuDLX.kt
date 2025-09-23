@@ -66,10 +66,10 @@ class DLX(private val numColumns: Int) {
             if (prev == null) {
                 n.L = n; n.R = n
             } else {
-                n.L = prev!!
-                n.R = prev!!.R
-                prev!!.R.L = n
-                prev!!.R = n
+                n.L = prev
+                n.R = prev.R
+                prev.R.L = n
+                prev.R = n
             }
             prev = n
         }
