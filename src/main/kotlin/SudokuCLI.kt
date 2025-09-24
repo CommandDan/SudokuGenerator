@@ -40,6 +40,7 @@ class SudokuCLI : CliktCommand(name = "sudoku-cli") {
     private val cols by option("--cols", help = "Antal kolonner i multi-layout").int().default(2)
     private val gapCells by option("--gap-cells", help = "Tomt mellemrum (i celler) mellem brætter").int().default(3)
     private val varySeeds by option("--vary-seeds", help = "Brug forskelligt seed for hvert bræt").flag(default = true)
+
     private val landscape by option("--landscape", help = "Brug A4 i landskab (rotate)").flag(default = false)
 
     /** Brug CLI-indstillingerne til at finde min-givens for et givent layout. */
