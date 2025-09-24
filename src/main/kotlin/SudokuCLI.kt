@@ -17,7 +17,7 @@ class SudokuCLI : CliktCommand(name = "sudoku-cli") {
     override fun help(context: Context) = "Generér Sudoku-PDF (single, samurai, plus4)"
     private val mode by option("--mode", "-m", help = "single | samurai | plus4 | samurai-dual | plus4-dual")
         .choice("single", "samurai", "plus4", "multi", "samurai-dual", "plus4-dual")
-        .default("plus4-dual")
+        .default("multi")
 
     private val out by option("--out", "-o", help = "Output PDF-fil").default("sudoku.pdf")
 
@@ -35,6 +35,7 @@ class SudokuCLI : CliktCommand(name = "sudoku-cli") {
     private val cols by option("--cols", help = "Antal kolonner i multi-layout").int().default(2)
     private val gapCells by option("--gap-cells", help = "Tomt mellemrum (i celler) mellem brætter").int().default(3)
     private val varySeeds by option("--vary-seeds", help = "Brug forskelligt seed for hvert bræt").flag(default = true)
+    private val landscape by option("--landscape", help = "Brug A4 i landskab (rotate)").flag(default = false)
 
     override fun run() {
         val box = BoxSpec(boxRows, boxCols)
@@ -55,7 +56,7 @@ class SudokuCLI : CliktCommand(name = "sudoku-cli") {
             "samurai-dual" -> {
                 val tl = emptyNxN(9); val tr = emptyNxN(9); val cc = emptyNxN(9); val bl = emptyNxN(9); val br = emptyNxN(9)
                 val (box9, boards9) = samuraiLayout(tl, tr, cc, bl, br)
-                val dualBoards = duplicateStackedVertical(box9, boards9, gapCells)
+                val dualBoards = if (landscape) duplicateSideBySide(box9, boards9, gapCells) else duplicateStackedVertical(box9, boards9, gapCells)
 
                 val generated = MultiSudokuGenerator.generate(
                     box = box9,
@@ -70,7 +71,8 @@ class SudokuCLI : CliktCommand(name = "sudoku-cli") {
                     boards = generated.boards,
                     solutionGlobal = generated.solutionGlobal,
                     includeSolutionPage = includeSolution,
-                    variantTitle = "Samurai (dual)"
+                    variantTitle = "Samurai (dual)",
+                    landscape = landscape
                 )
                 echo("Skrev: ${File(out).absolutePath}")
                 return
@@ -78,7 +80,7 @@ class SudokuCLI : CliktCommand(name = "sudoku-cli") {
             "plus4-dual" -> {
                 val up = emptyNxN(9); val left = emptyNxN(9); val right = emptyNxN(9); val down = emptyNxN(9)
                 val (box9, boards9) = plus4Layout(up, left, right, down)
-                val dualBoards = duplicateStackedVertical(box9, boards9, gapCells)
+                val dualBoards = if (landscape) duplicateSideBySide(box9, boards9, gapCells) else duplicateStackedVertical(box9, boards9, gapCells)
 
                 val generated = MultiSudokuGenerator.generate(
                     box = box9,
@@ -93,15 +95,17 @@ class SudokuCLI : CliktCommand(name = "sudoku-cli") {
                     boards = generated.boards,
                     solutionGlobal = generated.solutionGlobal,
                     includeSolutionPage = includeSolution,
-                    variantTitle = "Plus4 (dual)"
+                    variantTitle = "Plus4 (dual)",
+                    landscape = landscape
                 )
                 echo("Skrev: ${File(out).absolutePath}")
                 return
             }
             "multi" -> {
                 require(n == box.boxRows * box.boxCols) { "--n ($n) skal være boxRows*boxCols (${box.boxRows * box.boxCols})" }
+                val (effRows, effCols) = if (landscape) cols to rows else rows to cols
                 val multi = buildMultiSingles(
-                    rows = rows, cols = cols,
+                    rows = effRows, cols = effCols,
                     box = box,
                     seed = seed,
                     minGivens = minGivens,
@@ -115,7 +119,8 @@ class SudokuCLI : CliktCommand(name = "sudoku-cli") {
                     box = multi.box,
                     boards = multi.boards,
                     solutionGlobal = multi.solutionGlobal,
-                    includeSolutionPage = includeSolution
+                    includeSolutionPage = includeSolution,
+                    landscape = landscape
                 )
                 echo("Skrev: ${File(out).absolutePath}")
                 return
@@ -135,7 +140,8 @@ class SudokuCLI : CliktCommand(name = "sudoku-cli") {
             box = generated.box,
             boards = generated.boards,
             solutionGlobal = generated.solutionGlobal,
-            includeSolutionPage = includeSolution
+            includeSolutionPage = includeSolution,
+            landscape = landscape
         )
 
         echo("Skrev: ${File(out).absolutePath}")
@@ -274,9 +280,10 @@ private fun writePuzzlePdf(
     boards: List<BoardSpec>,
     solutionGlobal: Map<Pair<Int,Int>, Int>,
     includeSolutionPage: Boolean,
-    variantTitle: String? = null
+    variantTitle: String? = null,
+    landscape: Boolean = false
 ) {
-    val layout = PageLayout()
+    val layout = PageLayout(pageSize = if (landscape) PageSize.A4.rotate() else PageSize.A4)
     val doc = Document(layout.pageSize, layout.marginLeft, layout.marginRight, layout.marginTop, layout.marginBottom)
     val writer = PdfWriter.getInstance(doc, outFile.outputStream())
     doc.open()
