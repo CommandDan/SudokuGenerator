@@ -15,9 +15,9 @@ import java.io.File
 
 class SudokuCLI : CliktCommand(name = "sudoku-cli") {
     override fun help(context: Context) = "Generér Sudoku-PDF (single, samurai, plus4)"
-    private val mode by option("--mode", "-m", help = "single | samurai | plus4")
-        .choice("single", "samurai", "plus4", "multi")
-        .default("multi")
+    private val mode by option("--mode", "-m", help = "single | samurai | plus4 | samurai-dual | plus4-dual")
+        .choice("single", "samurai", "plus4", "multi", "samurai-dual", "plus4-dual")
+        .default("plus4-dual")
 
     private val out by option("--out", "-o", help = "Output PDF-fil").default("sudoku.pdf")
 
@@ -51,6 +51,52 @@ class SudokuCLI : CliktCommand(name = "sudoku-cli") {
             "plus4" -> {
                 val up = emptyNxN(9); val left = emptyNxN(9); val right = emptyNxN(9); val down = emptyNxN(9)
                 plus4Layout(up, left, right, down)
+            }
+            "samurai-dual" -> {
+                val tl = emptyNxN(9); val tr = emptyNxN(9); val cc = emptyNxN(9); val bl = emptyNxN(9); val br = emptyNxN(9)
+                val (box9, boards9) = samuraiLayout(tl, tr, cc, bl, br)
+                val dualBoards = duplicateStackedVertical(box9, boards9, gapCells)
+
+                val generated = MultiSudokuGenerator.generate(
+                    box = box9,
+                    boards = dualBoards,
+                    seed = seed,
+                    minGlobalGivens = minGivens
+                )
+
+                writePuzzlePdf(
+                    outFile = File(out),
+                    box = generated.box,
+                    boards = generated.boards,
+                    solutionGlobal = generated.solutionGlobal,
+                    includeSolutionPage = includeSolution,
+                    variantTitle = "Samurai (dual)"
+                )
+                echo("Skrev: ${File(out).absolutePath}")
+                return
+            }
+            "plus4-dual" -> {
+                val up = emptyNxN(9); val left = emptyNxN(9); val right = emptyNxN(9); val down = emptyNxN(9)
+                val (box9, boards9) = plus4Layout(up, left, right, down)
+                val dualBoards = duplicateStackedVertical(box9, boards9, gapCells)
+
+                val generated = MultiSudokuGenerator.generate(
+                    box = box9,
+                    boards = dualBoards,
+                    seed = seed,
+                    minGlobalGivens = minGivens
+                )
+
+                writePuzzlePdf(
+                    outFile = File(out),
+                    box = generated.box,
+                    boards = generated.boards,
+                    solutionGlobal = generated.solutionGlobal,
+                    includeSolutionPage = includeSolution,
+                    variantTitle = "Plus4 (dual)"
+                )
+                echo("Skrev: ${File(out).absolutePath}")
+                return
             }
             "multi" -> {
                 require(n == box.boxRows * box.boxCols) { "--n ($n) skal være boxRows*boxCols (${box.boxRows * box.boxCols})" }
@@ -164,6 +210,49 @@ private fun buildMultiSingles(
     return MultiSingles(box, boardsOut, solutionOut, rows, cols)
 }
 
+/** Duplikerer et helt layout side-om-side (vandret) med et mellemrum i celler. */
+private fun duplicateSideBySide(box: BoxSpec, boards: List<BoardSpec>, gapCells: Int): List<BoardSpec> {
+    // Find samlet bredde i celler for det eksisterende layout
+    val minCol = boards.minOf { it.offsetCol }
+    val maxCol = boards.maxOf { it.offsetCol + box.N - 1 }
+    val compositeWidth = maxCol - minCol + 1
+    val dx = compositeWidth + gapCells
+
+    // Første sæt: som de er
+    val first = boards.map { b ->
+        // lav en dyb-kopi af givens så vi ikke deler arrays utilsigtet
+        val g = Array(box.N) { r -> IntArray(box.N) { c -> b.givens[r][c] } }
+        BoardSpec(b.offsetRow, b.offsetCol, g)
+    }
+    // Andet sæt: samme brætter, men forskudt i kolonner
+    val second = boards.map { b ->
+        val g = Array(box.N) { IntArray(box.N) } // tomme givens; de bliver udfyldt af generatoren
+        BoardSpec(b.offsetRow, b.offsetCol + dx, g)
+    }
+    return first + second
+}
+
+/** Duplikerer et helt layout over/under (vertikalt) med et mellemrum i celler. */
+private fun duplicateStackedVertical(box: BoxSpec, boards: List<BoardSpec>, gapCells: Int): List<BoardSpec> {
+    // Find samlet højde i celler for det eksisterende layout
+    val minRow = boards.minOf { it.offsetRow }
+    val maxRow = boards.maxOf { it.offsetRow + box.N - 1 }
+    val compositeHeight = maxRow - minRow + 1
+    val dy = compositeHeight + gapCells
+
+    // Første sæt: som de er
+    val first = boards.map { b ->
+        val g = Array(box.N) { r -> IntArray(box.N) { c -> b.givens[r][c] } }
+        BoardSpec(b.offsetRow, b.offsetCol, g)
+    }
+    // Andet sæt: samme brætter, men forskudt i rækker
+    val second = boards.map { b ->
+        val g = Array(box.N) { IntArray(box.N) }
+        BoardSpec(b.offsetRow + dy, b.offsetCol, g)
+    }
+    return first + second
+}
+
 /* ======================= PDF-rendering (OpenPDF) ======================= */
 
 private data class PageLayout(
@@ -184,7 +273,8 @@ private fun writePuzzlePdf(
     box: BoxSpec,
     boards: List<BoardSpec>,
     solutionGlobal: Map<Pair<Int,Int>, Int>,
-    includeSolutionPage: Boolean
+    includeSolutionPage: Boolean,
+    variantTitle: String? = null
 ) {
     val layout = PageLayout()
     val doc = Document(layout.pageSize, layout.marginLeft, layout.marginRight, layout.marginTop, layout.marginBottom)
@@ -196,7 +286,7 @@ private fun writePuzzlePdf(
     val cb = writer.directContent
 
     doc.add(Paragraph("Sudoku Puzzle", titleFont))
-    doc.add(Paragraph("Variant: ${variantName(boards)}"))
+    doc.add(Paragraph("Variant: ${variantTitle ?: variantName(boards, box)}"))
 
     drawBoards(cb, layout, box, boards, drawNumbersFromBoards = true, solutionGlobal = solutionGlobal)
 
@@ -209,11 +299,28 @@ private fun writePuzzlePdf(
     doc.close()
 }
 
-private fun variantName(boards: List<BoardSpec>) = when (boards.size) {
-    1 -> "Single"
-    4 -> "Plus4"
-    5 -> "Samurai"
-    else -> "Multi (${boards.size} grids)"
+private fun variantName(boards: List<BoardSpec>, box: BoxSpec): String {
+    if (boards.size == 1) return "Single"
+
+    // Identify by specific offsets (for 9x9 variants that we define)
+    if (box.N == 9) {
+        val offsets = boards.map { it.offsetRow to it.offsetCol }.toSet()
+        val samurai = setOf(0 to 0, 0 to 12, 6 to 6, 12 to 0, 12 to 12)
+        val plus4  = setOf(0 to 6, 6 to 0, 6 to 12, 12 to 6)
+        if (offsets == samurai && boards.size == 5) return "Samurai"
+        if (offsets == plus4  && boards.size == 4) return "Plus4"
+    }
+
+    // Detect tiled multi layout (rows x cols) from distinct offsets
+    val distinctRows = boards.map { it.offsetRow }.distinct().sorted()
+    val distinctCols = boards.map { it.offsetCol }.distinct().sorted()
+    val r = distinctRows.size
+    val c = distinctCols.size
+    if (r * c == boards.size && (r > 1 || c > 1)) {
+        return "Multi ${r}×${c}"
+    }
+
+    return "Multi (${boards.size} grids)"
 }
 
 private fun drawBoards(
@@ -229,10 +336,13 @@ private fun drawBoards(
     val widthCells = allCols.last - allCols.first + 1
     val heightCells = allRows.last - allRows.first + 1
 
-    val gridW = widthCells * layout.cell
-    val gridH = heightCells * layout.cell
+    // Auto scale cell size to fit page
     val usableW = layout.pageSize.width - layout.marginLeft - layout.marginRight
     val usableH = layout.pageSize.height - layout.marginTop - layout.marginBottom
+    val cellSize = kotlin.math.min(usableW / widthCells, usableH / heightCells)
+
+    val gridW = widthCells * cellSize
+    val gridH = heightCells * cellSize
     val originX = layout.marginLeft + (usableW - gridW) / 2f
     val originY = layout.marginBottom + (usableH - gridH) / 2f
 
@@ -240,32 +350,33 @@ private fun drawBoards(
     for (b in boards) {
         drawSingleGridLines(
             cb, layout, box,
-            originX + (b.offsetCol - allCols.first) * layout.cell,
-            originY + (b.offsetRow - allRows.first) * layout.cell
+            originX + (b.offsetCol - allCols.first) * cellSize,
+            originY + (b.offsetRow - allRows.first) * cellSize,
+            cellSize
         )
     }
 
     // Tal
     for (b in boards) {
-        val startX = originX + (b.offsetCol - allCols.first) * layout.cell
-        val startY = originY + (b.offsetRow - allRows.first) * layout.cell
+        val startX = originX + (b.offsetCol - allCols.first) * cellSize
+        val startY = originY + (b.offsetRow - allRows.first) * cellSize
         for (r in 0 until box.N) for (c in 0 until box.N) {
             val v = if (drawNumbersFromBoards) b.givens[r][c]
             else solutionGlobal[(b.offsetRow + r) to (b.offsetCol + c)] ?: 0
-            if (v != 0) drawCenteredNumber(cb, startX, startY, layout, r, c, v)
+            if (v != 0) drawCenteredNumber(cb, startX, startY, layout, r, c, v, cellSize)
         }
     }
 }
 
-private fun drawSingleGridLines(cb: PdfContentByte, layout: PageLayout, box: BoxSpec, startX: Float, startY: Float) {
+private fun drawSingleGridLines(cb: PdfContentByte, layout: PageLayout, box: BoxSpec, startX: Float, startY: Float, cellSize: Float) {
     val N = box.N
     cb.saveState()
     cb.setLineWidth(layout.lineThin)
     for (i in 0..N) {
-        val y = startY + i * layout.cell
-        cb.moveTo(startX, y); cb.lineTo(startX + N * layout.cell, y)
-        val x = startX + i * layout.cell
-        cb.moveTo(x, startY); cb.lineTo(x, startY + N * layout.cell)
+        val y = startY + i * cellSize
+        cb.moveTo(startX, y); cb.lineTo(startX + N * cellSize, y)
+        val x = startX + i * cellSize
+        cb.moveTo(x, startY); cb.lineTo(x, startY + N * cellSize)
     }
     cb.stroke()
     cb.restoreState()
@@ -273,14 +384,14 @@ private fun drawSingleGridLines(cb: PdfContentByte, layout: PageLayout, box: Box
     cb.saveState()
     cb.setLineWidth(layout.lineThick)
     for (br in 0..(N / box.boxRows)) {
-        val y = startY + br * box.boxRows * layout.cell
-        cb.moveTo(startX, y); cb.lineTo(startX + N * layout.cell, y)
+        val y = startY + br * box.boxRows * cellSize
+        cb.moveTo(startX, y); cb.lineTo(startX + N * cellSize, y)
     }
     for (bc in 0..(N / box.boxCols)) {
-        val x = startX + bc * box.boxCols * layout.cell
-        cb.moveTo(x, startY); cb.lineTo(x, startY + N * layout.cell)
+        val x = startX + bc * box.boxCols * cellSize
+        cb.moveTo(x, startY); cb.lineTo(x, startY + N * cellSize)
     }
-    cb.rectangle(startX, startY, N * layout.cell, N * layout.cell)
+    cb.rectangle(startX, startY, N * cellSize, N * cellSize)
     cb.stroke()
     cb.restoreState()
 }
@@ -292,13 +403,14 @@ private fun drawCenteredNumber(
     layout: PageLayout,
     r: Int,
     c: Int,
-    v: Int
+    v: Int,
+    cellSize: Float
 ) {
     val bf = BaseFont.createFont(BaseFont.HELVETICA, BaseFont.WINANSI, BaseFont.NOT_EMBEDDED)
-    val x = startX + c * layout.cell + layout.cell / 2f
-    val y = startY + (layout.cell * (r + 1)) - layout.cell * 0.72f
+    val x = startX + c * cellSize + cellSize / 2f
+    val y = startY + (cellSize * (r + 1)) - cellSize * 0.72f
     cb.beginText()
-    cb.setFontAndSize(bf, layout.numberSize)
+    cb.setFontAndSize(bf, minOf(layout.numberSize, cellSize * 0.7f))
     ColumnText.showTextAligned(cb, Element.ALIGN_CENTER, Phrase(v.toString()), x, y, 0f)
     cb.endText()
 }
