@@ -13,6 +13,7 @@ import org.openpdf.text.*
 import org.openpdf.text.pdf.*
 import java.io.File
 import kotlin.math.min
+import kotlin.math.roundToInt
 
 class SudokuCLI : CliktCommand(name = "sudoku-cli") {
     override fun help(context: Context) = "Generér Sudoku-PDF (single, samurai, plus4)"
@@ -23,8 +24,11 @@ class SudokuCLI : CliktCommand(name = "sudoku-cli") {
     private val out by option("--out", "-o", help = "Output PDF-fil").default("sudoku.pdf")
 
     private val seed by option("--seed", help = "RNG seed").long().default(System.nanoTime())
-    private val minGivens by option("--min-givens", help = "Minimum globale givens").int().default(26)
+    private val minGivens by option("--min-givens", help = "Minimum globale givens (angiv for at overstyre automatisk)").int()
     private val includeSolution by option("--solution-page", help = "Tilføj ekstra side med løsning").flag(default = false)
+
+    private val difficultyDegree by option("--difficulty", help = "Sværhedsgrad ( Nemmere : 1 ..< N : Sværere)").int()
+    private val difficultyLevel by option("--level", help = "Niveau for sværhedsgrad (easy | medium | hard | expert)").default("medium")
 
     // Kun relevant for single/generisk
     private val n by option("--n", help = "N (fx 9 for 9x9, 4 for 4x4)").int().default(9)
@@ -37,6 +41,19 @@ class SudokuCLI : CliktCommand(name = "sudoku-cli") {
     private val gapCells by option("--gap-cells", help = "Tomt mellemrum (i celler) mellem brætter").int().default(3)
     private val varySeeds by option("--vary-seeds", help = "Brug forskelligt seed for hvert bræt").flag(default = true)
     private val landscape by option("--landscape", help = "Brug A4 i landskab (rotate)").flag(default = false)
+
+    /** Brug CLI-indstillingerne til at finde min-givens for et givent layout. */
+    private fun computeMinGivens(box: BoxSpec, boards: List<BoardSpec>): Int {
+        val explicit = minGivens
+        if (explicit != null) return explicit
+        val unique = totalUniqueCells(box, boards)
+        return minGivensFromDifficultyNormalized(
+            numbers = box.N,
+            totalUniqueCells = unique,
+            difficulty = difficultyDegree,
+            level = difficultyLevel
+        )
+    }
 
     override fun run() {
         val box = BoxSpec(boxRows, boxCols)
@@ -63,7 +80,7 @@ class SudokuCLI : CliktCommand(name = "sudoku-cli") {
                     box = box9,
                     boards = dualBoards,
                     seed = seed,
-                    minGlobalGivens = minGivens
+                    minGlobalGivens = computeMinGivens(box9, dualBoards)
                 )
 
                 writePuzzlePdf(
@@ -87,7 +104,7 @@ class SudokuCLI : CliktCommand(name = "sudoku-cli") {
                     box = box9,
                     boards = dualBoards,
                     seed = seed,
-                    minGlobalGivens = minGivens
+                    minGlobalGivens = computeMinGivens(box9, dualBoards)
                 )
 
                 writePuzzlePdf(
@@ -105,11 +122,12 @@ class SudokuCLI : CliktCommand(name = "sudoku-cli") {
             "multi" -> {
                 require(n == box.boxRows * box.boxCols) { "--n ($n) skal være boxRows*boxCols (${box.boxRows * box.boxCols})" }
                 val (effRows, effCols) = if (landscape) cols to rows else rows to cols
+                val perBoardMin = minGivens ?: minGivensFromDifficultyNormalized(box.N, box.N * box.N, difficultyDegree, difficultyLevel)
                 val multi = buildMultiSingles(
                     rows = effRows, cols = effCols,
                     box = box,
                     seed = seed,
-                    minGivens = minGivens,
+                    minGivens = perBoardMin,
                     gapCells = gapCells,
                     varySeeds = varySeeds
                 )
@@ -133,7 +151,7 @@ class SudokuCLI : CliktCommand(name = "sudoku-cli") {
             box = finalBox,
             boards = boards,
             seed = seed,
-            minGlobalGivens = minGivens
+            minGlobalGivens = computeMinGivens(finalBox, boards)
         )
 
         writePuzzlePdf(
@@ -150,6 +168,63 @@ class SudokuCLI : CliktCommand(name = "sudoku-cli") {
 }
 
 fun main(args: Array<String>) = SudokuCLI().main(args)
+
+// ========= Normaliseret auto-min-givens (N-aware, overlap-aware) =========
+private fun clueRatioRangeForN(n: Int): Pair<Double, Double> = when {
+    // 4×4 (16 felter) – typisk 8–11 givens fra easy→expert
+    // lidt højere niveau for easy for at undgå trivielle bruteforce-løsninger
+    n <= 4  -> 0.70 to 0.50
+
+    // 16×16 (256 felter) – typisk ~100–60 givens fra easy→expert
+    // lidt højere easy for bedre indgang, og en realistisk expert-nedre grænse
+    n >= 16 -> 0.42 to 0.24
+
+    // 9×9 (81 felter) – typisk 42–21 givens fra easy→expert
+    // mere i tråd med mange aviser/udgivere
+    else    -> 0.52 to 0.26
+}
+
+private fun difficultyToT(difficulty: Int, numbers: Int): Double {
+    val maxD = (numbers - 1).coerceAtLeast(2)
+    val d = difficulty.coerceIn(1, maxD)
+    return (d - 1).toDouble() / (maxD - 1)
+}
+
+private fun levelToT(level: String): Double = when (level.lowercase()) {
+    "easy"   -> 0.15
+    "medium" -> 0.45
+    "hard"   -> 0.70
+    "expert" -> 0.90
+    else     -> 0.45
+}
+
+/** Antal unikke globale celler i et layout (overlap tælles én gang). */
+private fun totalUniqueCells(box: BoxSpec, boards: List<BoardSpec>): Int {
+    val seen = HashSet<Pair<Int, Int>>()
+    val N = box.N
+    for (b in boards) for (r in 0 until N) for (c in 0 until N) {
+        seen += (b.offsetRow + r) to (b.offsetCol + c)
+    }
+    return seen.size
+}
+
+/** Beregn automatisk min-givens ud fra sværhedsgrad. */
+private fun minGivensFromDifficultyNormalized(
+    numbers: Int,
+    totalUniqueCells: Int,
+    difficulty: Int? = null,
+    level: String? = null
+): Int {
+    val t = when {
+        difficulty != null -> difficultyToT(difficulty, numbers)
+        level != null      -> levelToT(level)
+        else               -> 0.45
+    }
+    val (easyRatio, expertRatio) = clueRatioRangeForN(numbers)
+    val ratio = easyRatio - t * (easyRatio - expertRatio)
+    return (ratio * totalUniqueCells).roundToInt()
+}
+
 
 /* ======================= Flere af single sudoku ======================= */
 
