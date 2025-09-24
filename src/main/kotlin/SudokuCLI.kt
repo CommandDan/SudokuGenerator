@@ -12,6 +12,7 @@ import com.github.ajalt.clikt.parameters.types.long
 import org.openpdf.text.*
 import org.openpdf.text.pdf.*
 import java.io.File
+import kotlin.math.min
 
 class SudokuCLI : CliktCommand(name = "sudoku-cli") {
     override fun help(context: Context) = "Generér Sudoku-PDF (single, samurai, plus4)"
@@ -290,17 +291,23 @@ private fun writePuzzlePdf(
 
     val bf = BaseFont.createFont(BaseFont.HELVETICA, BaseFont.WINANSI, BaseFont.NOT_EMBEDDED)
     val titleFont = Font(bf, layout.titleSize, Font.BOLD)
+    val bodyFont = Font(bf, layout.numberSize + 2f, Font.NORMAL)
     val cb = writer.directContent
 
-    doc.add(Paragraph("Sudoku Puzzle", titleFont))
-    doc.add(Paragraph("Variant: ${variantTitle ?: variantName(boards, box)}"))
+    val pTitle = Paragraph("Sudoku Puzzle", titleFont).apply { spacingAfter = 6f }
+    doc.add(pTitle)
+    val pVariant = Paragraph("Variant: ${variantTitle ?: variantName(boards, box)}", bodyFont).apply { spacingAfter = 6f }
+    doc.add(pVariant)
 
-    drawBoards(cb, layout, box, boards, drawNumbersFromBoards = true, solutionGlobal = solutionGlobal)
+    val contentTop = writer.getVerticalPosition(true)
+    drawBoards(cb, layout, box, boards, drawNumbersFromBoards = true, solutionGlobal = solutionGlobal, contentTopY = contentTop)
 
     if (includeSolutionPage) {
         doc.newPage()
-        doc.add(Paragraph("Solution", titleFont))
-        drawBoards(cb, layout, box, boards, drawNumbersFromBoards = false, solutionGlobal = solutionGlobal)
+        val pSolution = Paragraph("Solution", titleFont).apply { spacingAfter = 6f }
+        doc.add(pSolution)
+        val contentTop2 = writer.getVerticalPosition(true)
+        drawBoards(cb, layout, box, boards, drawNumbersFromBoards = false, solutionGlobal = solutionGlobal, contentTopY = contentTop2)
     }
 
     doc.close()
@@ -336,21 +343,24 @@ private fun drawBoards(
     box: BoxSpec,
     boards: List<BoardSpec>,
     drawNumbersFromBoards: Boolean,
-    solutionGlobal: Map<Pair<Int,Int>, Int>
+    solutionGlobal: Map<Pair<Int,Int>, Int>,
+    contentTopY: Float? = null
 ) {
     val allRows = boards.minOf { it.offsetRow } .. boards.maxOf { it.offsetRow + box.N - 1 }
     val allCols = boards.minOf { it.offsetCol } .. boards.maxOf { it.offsetCol + box.N - 1 }
     val widthCells = allCols.last - allCols.first + 1
     val heightCells = allRows.last - allRows.first + 1
 
-    // Auto scale cell size to fit page
+    // Auto scale cell size to fit within margins and below the current text cursor (contentTopY)
     val usableW = layout.pageSize.width - layout.marginLeft - layout.marginRight
-    val usableH = layout.pageSize.height - layout.marginTop - layout.marginBottom
-    val cellSize = kotlin.math.min(usableW / widthCells, usableH / heightCells)
+    val topLimit = contentTopY ?: (layout.pageSize.height - layout.marginTop) // y for top of drawable area
+    val usableH = (topLimit - layout.marginBottom).coerceAtLeast(24f)
+    val cellSize = min(usableW / widthCells, usableH / heightCells)
 
     val gridW = widthCells * cellSize
     val gridH = heightCells * cellSize
     val originX = layout.marginLeft + (usableW - gridW) / 2f
+    // center the grid in the remaining space between bottom margin and topLimit
     val originY = layout.marginBottom + (usableH - gridH) / 2f
 
     // Gitterlinjer pr. del-bræt
