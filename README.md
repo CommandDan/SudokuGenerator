@@ -119,4 +119,4 @@ PDF’en kan også indeholde en ekstra side med løsningen, hvis du angiver `--s
 ## 📜 Licens
 
 Dette projekt bruger [OpenPDF](https://github.com/LibrePDF/OpenPDF) (LGPL/MPL) og [Clikt](https://ajalt.github.io/clikt/) til CLI.  
-Selve generatoren er MIT-licenseret (medmindre du ændrer det).
+Selve generatoren er MIT-licenseret.
